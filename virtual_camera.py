@@ -6,9 +6,16 @@ import pygame as pg
 import pygame.gfxdraw as gfx
 from pygame.locals import *
 
+# Define region codes
+INSIDE = 0  # 0000
+LEFT = 1    # 0001
+RIGHT = 2   # 0010
+BOTTOM = 4  # 0100
+TOP = 8     # 1000
+
 
 def to_pygame(coords: tuple[float, float]) -> tuple[float, float]:
-    return (coords[0] * 640 + 640, 360 - coords[1] * 360)
+    return (round(coords[0] * 640 + 640), round(360 - coords[1] * 360))
 
 
 def draw_line(surface: pg.Surface, start_pos: tuple[float, float], end_pos: tuple[float, float],
@@ -46,18 +53,70 @@ def draw_line(surface: pg.Surface, start_pos: tuple[float, float], end_pos: tupl
                           ends[1][1], int(width / 2), color)
 
 
-def draw_lines(surface: pg.Surface, points: list[tuple[float, float]],
-               color: tuple[int, int, int], width: int, rounded=False) -> None:
-    for i in range(len(points) - 1):
-        draw_line(surface, points[i], points[i+1],
-                  color, width, rounded=rounded)
-
-
 def in_range(point: np.ndarray) -> bool:
     if abs(point[0]) <= 1 and abs(point[1]) <= 1 and abs(point[2]) <= 1:
         return True
     else:
         return False
+
+
+def line_line_intersection(point_a: tuple[float, float], point_b: tuple[float, float], point_c: tuple[float, float], point_d: tuple[float, float]) -> tuple[float, float]:
+    x = ((point_a[0] * point_b[1] - point_a[1] * point_b[0]) * (point_c[0] - point_d[0]) - (point_a[0] - point_b[0]) * (point_c[0] * point_d[1] -
+         point_c[1] * point_d[0])) / ((point_a[0] - point_b[0]) * (point_c[1] - point_d[1]) - (point_a[1] - point_b[1]) * (point_c[0] - point_d[0]))
+    y = ((point_a[0] * point_b[1] - point_a[1] * point_b[0]) * (point_c[1] - point_d[1]) - (point_a[1] - point_b[1]) * (point_c[0] * point_d[1] -
+         point_c[1] * point_d[0])) / ((point_a[0] - point_b[0]) * (point_c[1] - point_d[1]) - (point_a[1] - point_b[1]) * (point_c[0] - point_d[0]))
+    return (x, y)
+
+
+def compute_region_code(point: tuple[float, float]) -> int:
+    x, y = point
+    code = INSIDE
+
+    if x < -1:
+        code |= LEFT
+    elif x > 1:
+        code |= RIGHT
+
+    if y < -1:
+        code |= BOTTOM
+    elif y > 1:
+        code |= TOP
+
+    return code
+
+
+def cohen_sutherland(point_a: tuple[float, float], point_b: tuple[float, float]) -> tuple[float, float]:
+    code_a = compute_region_code(point_a)
+    code_b = compute_region_code(point_b)
+
+    if (code_a & code_b) != 0:
+        return None, None
+
+    if code_a != INSIDE:
+        if (code_a & LEFT) != 0:
+            point_a = line_line_intersection(
+                point_a, point_b, (-1, -1), (-1, 1))
+        if (code_a & RIGHT) != 0:
+            point_a = line_line_intersection(point_a, point_b, (1, -1), (1, 1))
+        if (code_a & BOTTOM) != 0:
+            point_a = line_line_intersection(
+                point_a, point_b, (-1, -1), (1, -1))
+        if (code_a & TOP) != 0:
+            point_a = line_line_intersection(point_a, point_b, (-1, 1), (1, 1))
+
+    if code_b != INSIDE:
+        if (code_b & LEFT) != 0:
+            point_b = line_line_intersection(
+                point_a, point_b, (-1, -1), (-1, 1))
+        if (code_b & RIGHT) != 0:
+            point_b = line_line_intersection(point_a, point_b, (1, -1), (1, 1))
+        if (code_b & BOTTOM) != 0:
+            point_b = line_line_intersection(
+                point_a, point_b, (-1, -1), (1, -1))
+        if (code_b & TOP) != 0:
+            point_b = line_line_intersection(point_a, point_b, (-1, 1), (1, 1))
+
+    return point_a, point_b
 
 
 class App:
@@ -67,6 +126,7 @@ class App:
         self.scene = []
 
         pg.init()
+        pg.display.set_caption('Virtual Camera App')
         self.screen = pg.display.set_mode((1280, 720))
         self.background_color = (44, 62, 80)
         self.clock = pg.time.Clock()
@@ -77,8 +137,8 @@ class App:
 
     def build_scene(self) -> None:
         transform = Transformation()
-        transform.scale((100, 100, 100))
-        transform.translate((0, 0, -750))
+        transform.scale((10, 10, 10))
+        transform.translate((0, 0, -75))
 
         colors = [
             (26, 188, 156),
@@ -92,14 +152,14 @@ class App:
         ]
 
         positions = [
-            (-150, -150, -150),
-            (150, -150, -150),
-            (-150, -150, 150),
-            (150, -150, 150),
-            (-150, 150, -150),
-            (150, 150, -150),
-            (-150, 150, 150),
-            (150, 150, 150)
+            (-15, -15, -15),
+            (15, -15, -15),
+            (-15, -15, 15),
+            (15, -15, 15),
+            (-15, 15, -15),
+            (15, 15, -15),
+            (-15, 15, 15),
+            (15, 15, 15)
         ]
 
         for i in range(8):
@@ -113,12 +173,11 @@ class App:
             self.scene.append(cube)
 
     def main_loop(self) -> None:
-        pg.display.set_caption('Virtual Camera App')
         self.screen.fill(self.background_color)
 
-        move_speed = 7.5
-        rotation_speed = .05
-        fov_change_speed = .05
+        move_speed = 0.75
+        rotation_speed = .025
+        fov_change_speed = .025
 
         running = True
         while running:
@@ -275,8 +334,8 @@ class Camera:
         return self.transform.get_t_matrix()
 
     def get_projection(self) -> np.ndarray:
-        n = 1
-        f = 10000
+        n = .1
+        f = 300
         e = 1 / tan(self.fov / 2)
         aspect = 16 / 9
 
@@ -338,11 +397,19 @@ class Cube:
             adjusted_vertices.append(adjusted_vertex[:3])
 
         for e in self.edges:
-            if in_range(adjusted_vertices[e[0]]) and in_range(adjusted_vertices[e[1]]):
-                start_pos = adjusted_vertices[e[0]][:2]
-                end_pos = adjusted_vertices[e[1]][:2]
-                draw_line(surface, start_pos, end_pos,
-                          self.color, self.width, rounded=True)
+            if in_range(adjusted_vertices[e[0]]) or in_range(adjusted_vertices[e[1]]):
+                point_a = adjusted_vertices[e[0]][:2]
+                point_b = adjusted_vertices[e[1]][:2]
+
+                if abs(adjusted_vertices[e[0]][2]) > 1 or abs(adjusted_vertices[e[1]][2]) > 1:
+                    if abs(point_a[0]) != 1 and abs(point_a[1]) != 1 and abs(point_b[0]) != 1 and abs(point_b[1]) != 1:
+                        continue
+
+                start_pos, end_pos = cohen_sutherland(point_a, point_b)
+
+                if start_pos is not None and end_pos is not None:
+                    draw_line(surface, start_pos, end_pos,
+                              self.color, self.width, rounded=True)
 
 
 if __name__ == "__main__":
